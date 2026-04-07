@@ -138,7 +138,7 @@ Added on top of the default Django settings:
   — In production, SECRET_KEY should be a long random value set via an
     environment variable so this key is never hardcoded in source.
 
-  VIRUSTOTAL_API_KEY = '84c6f6057bf3ab55be28abea00f28c5dccf0847024fc182b56bf0fb1a05c9216'
+  VIRUSTOTAL_API_KEY = os.environ.get('VIRUSTOTAL_API_KEY', '')  # loaded from .env
   — Taken from the student's urlcheckerapi.py.
   — Moved here so it is never hardcoded inside the utility functions.
 

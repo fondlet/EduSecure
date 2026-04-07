@@ -1,9 +1,14 @@
 import hashlib
+import os
 from pathlib import Path
+
+from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-SECRET_KEY = 'change-me-in-production'
+load_dotenv(BASE_DIR / '.env')
+
+SECRET_KEY = os.environ.get('SECRET_KEY', 'change-me-in-production')
 
 DEBUG = True
 
@@ -72,8 +77,8 @@ AUTH_USER_MODEL = 'accounts.User'
 # In production, set SECRET_KEY to a long random value via environment variable.
 ENCRYPTION_KEY: bytes = hashlib.sha256(SECRET_KEY.encode()).digest()
 
-# VirusTotal API key — move to environment variable in production
-VIRUSTOTAL_API_KEY = '84c6f6057bf3ab55be28abea00f28c5dccf0847024fc182b56bf0fb1a05c9216'
+# VirusTotal API key — loaded from .env (never hardcoded in source)
+VIRUSTOTAL_API_KEY = os.environ.get('VIRUSTOTAL_API_KEY', '')
 
 # Redirect unauthenticated users to login
 LOGIN_URL = '/accounts/login/'
