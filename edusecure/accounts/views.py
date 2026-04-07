@@ -82,6 +82,9 @@ def mfa_verify_view(request):
             if user.verify_totp(form.cleaned_data['token']):
                 # Full login — clear the pending flag
                 del request.session['mfa_pending_user_id']
+                # backend must be set explicitly when logging in a user fetched
+                # directly from the DB rather than via auth.authenticate()
+                user.backend = 'django.contrib.auth.backends.ModelBackend'
                 auth.login(request, user)
                 return redirect('submission_list')
             else:
