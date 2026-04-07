@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}Upload Submission{% endblock %}
+{% block content %}
+<div class="row justify-content-center">
+  <div class="col-md-6">
+    <div class="card p-4">
+      <h3 class="mb-1">Upload Assignment</h3>
+      <p class="text-muted mb-3">
+        Your file will be <strong>AES-256-GCM encrypted</strong>,
+        an <strong>HMAC-SHA256</strong> integrity digest will be computed,
+        and the file will be scanned by <strong>VirusTotal</strong> before saving.
+      </p>
+      <form method="post" enctype="multipart/form-data">
+        {% csrf_token %}
+        <div class="mb-3">
+          <label class="form-label fw-semibold">Title</label>
+          {{ form.title }}
+        </div>
+        <div class="mb-3">
+          <label class="form-label fw-semibold">File</label>
+          {{ form.file }}
+        </div>
+        <button type="submit" class="btn btn-primary w-100">Upload &amp; Scan</button>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,742 @@
+================================================================================
+EDUSECURE — FULL DEVELOPMENT LOG
+================================================================================
+
+
+================================================================================
+PART 1 — SCRIPT ORGANISATION
+================================================================================
+
+Location: /home/Morika1/Downloads/python calc/
+
+The following loose scripts were moved into categorised folders:
+
+  cryptography/
+    - aes_encryption        (no extension — original AES script)
+    - aes_encryption.py     (AES-ECB challenge-response script)
+    - rc4.py                (RC4 stream cipher implementation)
+    - bgv.py                (BGV homomorphic encryption via openfhe)
+
+  security/
+    - totp.py               (manual RFC 6238 TOTP — shows full HMAC-SHA1 steps)
+    - e-votingsystem.py     (BGV homomorphic e-voting system)
+    - urlcheckerapi.py      (VirusTotal v3 API — URL and file scanning)
+
+  algorithms/
+    - bubblesort.py
+
+  calculator/
+    - Calculator.py
+    - TestCalc.py
+
+  coursework/
+    - problem3.py           (library management system)
+    - books.json
+    - borrow.json
+    - tables.json
+    - users.json
+
+  assets/
+    - obscured_305464337-760x500.png
+    - restored_obscured_305464337-760x500.png
+    - Untitled.png
+
+The old "coursework " folder (with trailing space) was removed after its
+contents were moved.
+
+
+================================================================================
+PART 2 — DJANGO PROJECT STRUCTURE CREATED
+================================================================================
+
+Location: /home/Morika1/edusecure/
+
+Full directory layout created:
+
+  edusecure/
+  ├── manage.py
+  ├── requirements.txt
+  ├── db.sqlite3                     (created by migrate)
+  ├── venv/                          (Python virtual environment)
+  ├── config/
+  │   ├── __init__.py
+  │   ├── settings.py
+  │   ├── urls.py
+  │   └── wsgi.py
+  ├── accounts/
+  │   ├── __init__.py
+  │   ├── apps.py
+  │   ├── models.py
+  │   ├── forms.py
+  │   ├── views.py
+  │   ├── urls.py
+  │   └── migrations/
+  │       └── 0001_initial.py
+  ├── submissions/
+  │   ├── __init__.py
+  │   ├── models.py
+  │   ├── views.py
+  │   ├── urls.py
+  │   └── migrations/
+  │       └── 0001_initial.py
+  ├── grades/
+  │   ├── __init__.py
+  │   ├── models.py
+  │   ├── views.py
+  │   └── urls.py
+  ├── utils/
+  │   ├── __init__.py
+  │   ├── crypto.py
+  │   └── virustotal.py
+  ├── templates/
+  │   ├── base.html
+  │   ├── accounts/
+  │   │   ├── register.html
+  │   │   ├── login.html
+  │   │   ├── mfa_setup.html
+  │   │   └── mfa_verify.html
+  │   └── submissions/
+  │       ├── upload.html
+  │       └── list.html
+  └── static/
+
+
+================================================================================
+PART 3 — REQUIREMENTS.TXT
+================================================================================
+
+django>=4.2,<5.0
+pycryptodome>=3.19       — AES-256-GCM and all cipher primitives
+pyotp>=2.9               — RFC 6238 TOTP (same algorithm as the manual totp.py)
+qrcode[pil]>=7.4         — QR code generation for Microsoft Authenticator
+Pillow>=10.0             — image backend required by qrcode
+requests>=2.31           — HTTP calls to VirusTotal API
+
+A Python virtual environment was created at edusecure/venv/ because the
+system runs Arch Linux with an externally-managed Python installation.
+All packages were installed into the venv.
+
+To run anything use:
+  venv/bin/python manage.py <command>
+  venv/bin/python manage.py runserver
+
+
+================================================================================
+PART 4 — config/settings.py
+================================================================================
+
+Added on top of the default Django settings:
+
+  import hashlib
+
+  AUTH_USER_MODEL = 'accounts.User'
+  — Tells Django to use the custom User model instead of the built-in one.
+  — Must be set before the first migration or the database schema breaks.
+
+  ENCRYPTION_KEY: bytes = hashlib.sha256(SECRET_KEY.encode()).digest()
+  — Derives a 32-byte (256-bit) AES key deterministically from SECRET_KEY.
+  — In production, SECRET_KEY should be a long random value set via an
+    environment variable so this key is never hardcoded in source.
+
+  VIRUSTOTAL_API_KEY = '84c6f6057bf3ab55be28abea00f28c5dccf0847024fc182b56bf0fb1a05c9216'
+  — Taken from the student's urlcheckerapi.py.
+  — Moved here so it is never hardcoded inside the utility functions.
+
+  LOGIN_URL = '/accounts/login/'
+  LOGIN_REDIRECT_URL = '/submissions/'
+  — Unauthenticated requests redirect to login.
+  — Successful login lands on the submissions list.
+
+
+================================================================================
+PART 5 — config/urls.py
+================================================================================
+
+from django.contrib import admin
+from django.urls import path, include
+from django.shortcuts import redirect
+
+urlpatterns = [
+    path('admin/',       admin.site.urls),
+    path('accounts/',    include('accounts.urls')),
+    path('submissions/', include('submissions.urls')),
+    path('grades/',      include('grades.urls')),
+    path('',             lambda req: redirect('login'), name='home'),
+]
+
+The root URL '/' redirects straight to the login page.
+
+
+================================================================================
+PART 6 — utils/crypto.py
+================================================================================
+
+Adapted from the student's aes_encryption.py but UPGRADED from AES-ECB
+to AES-GCM.
+
+WHY THE UPGRADE:
+  AES-ECB (Electronic Codebook) encrypts every 16-byte block independently
+  with the same key. Identical plaintext blocks produce identical ciphertext
+  blocks, so patterns in the data leak through the ciphertext. There is also
+  no authentication — an attacker can modify the ciphertext undetected.
+
+  AES-GCM (Galois/Counter Mode) uses a random 16-byte nonce so every
+  encryption produces different output even for the same plaintext. It also
+  produces a 16-byte authentication tag. If even one bit of the ciphertext
+  is changed after encryption, the tag check fails and decryption raises an
+  error. This provides both confidentiality AND integrity in one operation.
+
+----------------------------------------------------------------------
+FUNCTION: encrypt_aes_gcm(plaintext: str, key: bytes) -> str
+----------------------------------------------------------------------
+
+  nonce = os.urandom(16)
+  cipher = AES.new(key, AES.MODE_GCM, nonce=nonce)
+  ciphertext, tag = cipher.encrypt_and_digest(plaintext.encode('utf-8'))
+
+  Returns a JSON string with three base64-encoded fields:
+    nonce      — 16 random bytes, unique per encryption, never reused
+    ciphertext — the encrypted payload
+    tag        — 16-byte GCM authentication tag
+
+  The nonce never needs to be secret but MUST be unique for every
+  encryption under the same key. os.urandom guarantees this.
+
+----------------------------------------------------------------------
+FUNCTION: decrypt_aes_gcm(token: str, key: bytes) -> str
+----------------------------------------------------------------------
+
+  data = json.loads(token)
+  cipher = AES.new(key, AES.MODE_GCM, nonce=base64.b64decode(data['nonce']))
+  plaintext = cipher.decrypt_and_verify(ciphertext, tag)
+
+  decrypt_and_verify raises ValueError automatically if the tag does not
+  match — meaning the ciphertext was tampered with. This directly addresses
+  the assignment incident where an attacker modified a submitted file.
+
+----------------------------------------------------------------------
+FUNCTION: compute_hmac(data: bytes, key: bytes) -> str
+----------------------------------------------------------------------
+
+  return hmac.new(key, data, hashlib.sha256).hexdigest()
+
+  Computes HMAC-SHA256 over raw bytes. This is the same keyed-hash
+  mechanism shown step by step in totp.py (which uses HMAC-SHA1 for the
+  TOTP counter). Here SHA-256 is used for stronger collision resistance.
+
+  Returns a 64-character hex string.
+
+----------------------------------------------------------------------
+FUNCTION: verify_hmac(data: bytes, key: bytes, expected: str) -> bool
+----------------------------------------------------------------------
+
+  actual = compute_hmac(data, key)
+  return hmac.compare_digest(actual, expected)
+
+  Uses hmac.compare_digest instead of == to prevent timing side-channel
+  attacks. A normal string comparison (==) short-circuits on the first
+  mismatched character, leaking information about how much of the digest
+  matched. compare_digest always takes the same time regardless.
+
+
+================================================================================
+PART 7 — utils/virustotal.py
+================================================================================
+
+Adapted from the student's urlcheckerapi.py.
+
+Changes made:
+  - Removed the while True CLI input loop
+  - Removed the hardcoded API key (now loaded from settings.VIRUSTOTAL_API_KEY)
+  - Split into two clean functions that return dicts instead of printing
+  - Added timeout parameters to all requests calls
+  - Made it importable by Django views
+
+----------------------------------------------------------------------
+FUNCTION: scan_url(url: str) -> dict
+----------------------------------------------------------------------
+
+  url_id = base64.urlsafe_b64encode(url.encode()).decode().rstrip("=")
+  response = requests.get(f"{VT_BASE}/urls/{url_id}", headers=_headers(), timeout=15)
+  stats = response.json()["data"]["attributes"]["last_analysis_stats"]
+
+  VirusTotal v3 requires the URL to be base64url-encoded without padding
+  before it can be looked up. The function queries the last_analysis_stats
+  from the response JSON and returns:
+
+    {
+      "safe":       bool or None,
+      "malicious":  int,
+      "suspicious": int,
+      "message":    str
+    }
+
+----------------------------------------------------------------------
+FUNCTION: scan_file(file_obj, filename: str) -> dict
+----------------------------------------------------------------------
+
+  upload_resp = requests.post(f"{VT_BASE}/files", headers=_headers(),
+                              files={"file": (filename, file_obj)}, timeout=60)
+  analysis_id = upload_resp.json()["data"]["id"]
+
+  for _ in range(10):
+      time.sleep(15)
+      report = requests.get(f"{VT_BASE}/analyses/{analysis_id}", ...).json()
+      if report["data"]["attributes"]["status"] == "completed":
+          ...
+
+  Uploads the file to VirusTotal, gets back an analysis_id, then polls
+  every 15 seconds up to 10 times (approximately 2.5 minutes total).
+  Returns the same dict shape as scan_url.
+
+  If the scan does not complete in time, returns safe=None with a warning
+  message so the submission is not silently marked safe.
+
+
+================================================================================
+PART 8 — accounts/models.py
+================================================================================
+
+Extended Django's AbstractUser with three extra fields:
+
+  class User(AbstractUser):
+      ROLE_CHOICES = [
+          ('student',  'Student'),
+          ('lecturer', 'Lecturer'),
+          ('admin',    'Admin'),
+      ]
+      role        = models.CharField(max_length=20, choices=ROLE_CHOICES, default='student')
+      totp_secret = models.CharField(max_length=64, blank=True)
+      mfa_enabled = models.BooleanField(default=False)
+
+  role        — distinguishes students, lecturers, and admins for later
+                permission-based views
+  totp_secret — base-32 encoded TOTP secret provisioned during MFA setup;
+                blank until the user completes setup
+  mfa_enabled — False until the user scans the QR code and confirms with
+                a valid token; the two-step login only triggers when True
+
+Three helper methods:
+
+----------------------------------------------------------------------
+METHOD: generate_totp_secret()
+----------------------------------------------------------------------
+
+  self.totp_secret = pyotp.random_base32()
+  self.save(update_fields=['totp_secret'])
+  return self.totp_secret
+
+  Called every time the MFA setup page loads. Generates a fresh
+  cryptographically random base-32 secret and persists it immediately
+  so it is available for QR code generation and later verification.
+
+----------------------------------------------------------------------
+METHOD: get_totp_uri()
+----------------------------------------------------------------------
+
+  return pyotp.totp.TOTP(self.totp_secret).provisioning_uri(
+      name=self.email or self.username,
+      issuer_name="EduSecure",
+  )
+
+  Returns the otpauth:// URI in the standard format:
+    otpauth://totp/EduSecure:username?secret=SECRET&issuer=EduSecure
+
+  Microsoft Authenticator, Google Authenticator, and Authy all read this
+  URI when scanning a QR code to set up an account.
+
+----------------------------------------------------------------------
+METHOD: verify_totp(token: str) -> bool
+----------------------------------------------------------------------
+
+  totp = pyotp.TOTP(self.totp_secret)
+  return totp.verify(token, valid_window=1)
+
+  valid_window=1 allows the token from the previous or next 30-second
+  window to be accepted as well. This tolerates up to 30 seconds of
+  clock drift between the server and the user's phone without requiring
+  clock synchronisation.
+
+
+================================================================================
+PART 9 — accounts/forms.py
+================================================================================
+
+Three forms:
+
+  RegisterForm (extends UserCreationForm)
+  — Fields: username, email, role, password1, password2
+  — email marked required (not required by default in UserCreationForm)
+  — role is a dropdown of student / lecturer / admin
+
+  LoginForm
+  — Fields: username, password (PasswordInput widget hides characters)
+
+  MFATokenForm
+  — Single field: token (CharField, min and max length both 6)
+  — inputmode="numeric" on the widget prompts a number keyboard on mobile
+  — autocomplete="one-time-code" tells browsers and password managers
+    this is an OTP field
+
+
+================================================================================
+PART 10 — accounts/views.py
+================================================================================
+
+----------------------------------------------------------------------
+VIEW: register_view
+----------------------------------------------------------------------
+
+  Standard form-based registration. On POST with a valid RegisterForm,
+  calls form.save() to create the User record (password is automatically
+  hashed by Django's PBKDF2-SHA256). Redirects to login on success.
+
+----------------------------------------------------------------------
+VIEW: login_view  (Step 1 of 2-step login)
+----------------------------------------------------------------------
+
+  user = auth.authenticate(request, username=..., password=...)
+
+  If credentials are wrong: show error, stay on login page.
+
+  If MFA is enabled:
+    request.session['mfa_pending_user_id'] = user.pk
+    redirect to mfa_verify
+
+    auth.login() is NOT called here. The user is not logged in yet.
+    Their PK is stored in the session so the verify step knows who to
+    finish logging in after the TOTP check passes.
+
+  If MFA is not set up yet:
+    auth.login(request, user)    — log in immediately
+    redirect to mfa_setup        — prompt them to configure MFA
+
+----------------------------------------------------------------------
+VIEW: mfa_verify_view  (Step 2 of 2-step login)
+----------------------------------------------------------------------
+
+  user_id = request.session.get('mfa_pending_user_id')
+  user = User.objects.get(pk=user_id)
+
+  if user.verify_totp(form.cleaned_data['token']):
+      del request.session['mfa_pending_user_id']
+      auth.login(request, user)
+      redirect to submission_list
+
+  If the token is wrong: show error, stay on verify page.
+  If no pending user in session: redirect back to login (prevents
+  someone navigating directly to /accounts/mfa/verify/ without logging in).
+
+----------------------------------------------------------------------
+VIEW: mfa_setup_view  (QR code generation for Microsoft Authenticator)
+----------------------------------------------------------------------
+
+  secret = user.generate_totp_secret()    — fresh base-32 secret
+  uri    = user.get_totp_uri()             — otpauth:// URI
+
+  qr_img = qrcode.make(uri)               — generate QR image in memory
+  buf    = io.BytesIO()
+  qr_img.save(buf, format='PNG')
+  qr_b64 = base64.b64encode(buf.getvalue()).decode()
+
+  The QR code is rendered as a base64-encoded PNG embedded directly in
+  the HTML template as a data URI:
+    <img src="data:image/png;base64,{{ qr_b64 }}">
+
+  No file is written to disk. No extra URL is needed to serve the image.
+
+  When the user submits the 6-digit confirmation code:
+    if user.verify_totp(token):
+        user.mfa_enabled = True
+        user.save(update_fields=['mfa_enabled'])
+
+  MFA only activates after the user proves they scanned the QR correctly.
+
+  The raw secret is also shown as text below the QR code as a fallback
+  for users who want to enter it manually in their authenticator app.
+
+----------------------------------------------------------------------
+VIEW: logout_view
+----------------------------------------------------------------------
+
+  auth.logout(request)
+  redirect to login
+
+
+================================================================================
+PART 11 — accounts/urls.py
+================================================================================
+
+  urlpatterns = [
+      path('register/',   views.register_view,   name='register'),
+      path('login/',      views.login_view,       name='login'),
+      path('logout/',     views.logout_view,      name='logout'),
+      path('mfa/setup/',  views.mfa_setup_view,   name='mfa_setup'),
+      path('mfa/verify/', views.mfa_verify_view,  name='mfa_verify'),
+  ]
+
+All included under accounts/ in the root urls.py so full paths are:
+  /accounts/register/
+  /accounts/login/
+  /accounts/logout/
+  /accounts/mfa/setup/
+  /accounts/mfa/verify/
+
+
+================================================================================
+PART 12 — submissions/models.py
+================================================================================
+
+  class Submission(models.Model):
+      student           = models.ForeignKey(settings.AUTH_USER_MODEL,
+                                            on_delete=models.CASCADE,
+                                            related_name='submissions')
+      title             = models.CharField(max_length=255)
+      submitted_at      = models.DateTimeField(auto_now_add=True)
+      encrypted_content = models.TextField()
+      hmac_digest       = models.CharField(max_length=64)
+      vt_result         = models.TextField(blank=True)
+      vt_safe           = models.BooleanField(null=True)
+
+  encrypted_content
+  — Stores the AES-256-GCM JSON blob (nonce + ciphertext + tag) as text.
+  — The original file content can only be read by someone who has the key.
+
+  hmac_digest
+  — HMAC-SHA256 hex digest of the raw uploaded file bytes.
+  — If the stored encrypted_content is ever modified in the database,
+    the integrity check will fail on next read.
+
+  vt_result
+  — Human-readable message from VirusTotal (e.g. "File appears safe."
+    or "ALERT: 3 malicious, 1 suspicious detections.").
+
+  vt_safe
+  — Boolean stored so the template can show a coloured badge immediately.
+  — null=True means None is stored when VT timed out or errored,
+    shown as "Unknown" rather than incorrectly marking the file safe.
+
+  ordering = ['-submitted_at']  — newest submissions shown first
+
+
+================================================================================
+PART 13 — submissions/views.py
+================================================================================
+
+----------------------------------------------------------------------
+VIEW: upload_submission
+----------------------------------------------------------------------
+
+  Full pipeline on POST:
+
+  1. Read file bytes
+     raw_bytes = uploaded.read()
+
+  2. HMAC-SHA256 integrity fingerprint over raw bytes
+     hmac_digest = compute_hmac(raw_bytes, key)
+
+     Computed BEFORE encryption so it covers the original content.
+     Any modification to the encrypted blob OR the original content
+     will cause verification to fail.
+
+  3. AES-256-GCM encrypt the content
+     text_content = raw_bytes.decode('utf-8', errors='replace')
+     encrypted = encrypt_aes_gcm(text_content, key)
+
+     errors='replace' means binary files that are not valid UTF-8 are
+     still stored (with replacement characters) rather than crashing.
+
+  4. VirusTotal file scan
+     uploaded.seek(0)                    — seek back to start after read()
+     vt = scan_file(uploaded, uploaded.name)
+
+  5. Save to database
+     Submission.objects.create(
+         student=request.user,
+         title=form.cleaned_data['title'],
+         encrypted_content=encrypted,
+         hmac_digest=hmac_digest,
+         vt_result=vt['message'],
+         vt_safe=vt['safe'],
+     )
+
+----------------------------------------------------------------------
+VIEW: list_submissions
+----------------------------------------------------------------------
+
+  Fetches all submissions belonging to the logged-in user.
+  For each one, attempts to decrypt using decrypt_aes_gcm.
+  If decryption fails (tamper detected — tag mismatch), plaintext is
+  set to an error message and decrypted_ok is False.
+  A 500-character preview of the plaintext is passed to the template.
+  The template shows integrity and VT verdict badges per submission.
+
+
+================================================================================
+PART 14 — submissions/urls.py
+================================================================================
+
+  urlpatterns = [
+      path('',        views.list_submissions,  name='submission_list'),
+      path('upload/', views.upload_submission, name='upload_submission'),
+  ]
+
+Full paths (included under submissions/ in root urls.py):
+  /submissions/         — list
+  /submissions/upload/  — upload form
+
+
+================================================================================
+PART 15 — MIGRATIONS AND DATABASE
+================================================================================
+
+Commands run:
+
+  venv/bin/python manage.py makemigrations accounts
+  — Created accounts/migrations/0001_initial.py
+  — Defines the custom User table with role, totp_secret, mfa_enabled
+
+  venv/bin/python manage.py makemigrations submissions
+  — Created submissions/migrations/0001_initial.py
+  — Defines the Submission table
+
+  venv/bin/python manage.py migrate
+  — Applied all migrations including Django's built-in ones:
+    contenttypes, auth, sessions, admin, accounts, submissions
+  — Created db.sqlite3
+
+  venv/bin/python manage.py check
+  — 0 issues found
+
+
+================================================================================
+PART 16 — TEMPLATES (Bootstrap 5)
+================================================================================
+
+----------------------------------------------------------------------
+base.html
+----------------------------------------------------------------------
+
+  Bootstrap 5 loaded from CDN.
+  Navbar shows:
+    - If logged in:  Submissions link, MFA Setup link, Logout (username)
+    - If logged out: Login link, Register link
+  Django messages framework alerts displayed below navbar with
+  dismiss buttons.
+  All other templates extend this with {% block content %}.
+
+----------------------------------------------------------------------
+accounts/register.html
+----------------------------------------------------------------------
+
+  Renders RegisterForm fields in a centred card.
+  Shows field-level validation errors in red below each input.
+  Link to login page at the bottom.
+
+----------------------------------------------------------------------
+accounts/login.html
+----------------------------------------------------------------------
+
+  Username and password fields in a centred card.
+  Link to register page at the bottom.
+
+----------------------------------------------------------------------
+accounts/mfa_setup.html
+----------------------------------------------------------------------
+
+  Shows:
+  - The QR code as an embedded base64 PNG image (220px wide)
+  - The raw base-32 secret as text for manual entry
+  - The MFATokenForm for the user to enter their first code to confirm
+  Explains that Microsoft Authenticator should be used to scan the code.
+
+----------------------------------------------------------------------
+accounts/mfa_verify.html
+----------------------------------------------------------------------
+
+  Single MFATokenForm for the 6-digit TOTP code.
+  Shown during login step 2 when the user has MFA enabled.
+
+----------------------------------------------------------------------
+submissions/upload.html
+----------------------------------------------------------------------
+
+  Title and file input form.
+  Explains in plain language what happens:
+    - AES-256-GCM encryption
+    - HMAC-SHA256 integrity digest
+    - VirusTotal scan
+  enctype="multipart/form-data" set on the form (required for file uploads).
+
+----------------------------------------------------------------------
+submissions/list.html
+----------------------------------------------------------------------
+
+  Upload New button at top right.
+  Per submission card shows:
+    - Title and submission timestamp
+    - Green badge "Integrity OK" or red badge "Integrity FAIL"
+    - Green badge "VT: Safe", red badge "VT: Threat Detected",
+      or grey badge "VT: Unknown"
+    - VirusTotal result message in small grey text
+    - Collapsible <details> element with decrypted content preview
+
+
+================================================================================
+PART 17 — MAPPING EXISTING SCRIPTS TO DJANGO
+================================================================================
+
+  aes_encryption.py  (AES-ECB, had bugs: init() instead of input(),
+                      stray literal 6 on a line)
+  → Replaced by utils/crypto.py using AES-256-GCM.
+    ECB mode is insecure. GCM provides authenticated encryption.
+    The original script is kept in the cryptography/ folder for reference.
+
+  totp.py  (manual RFC 6238 TOTP showing every HMAC-SHA1 step explicitly)
+  → The same algorithm is used by pyotp in accounts/models.py.
+    pyotp.TOTP produces identical codes to the manual script given the
+    same secret and timestamp. The manual script demonstrates the maths
+    for the assignment report; pyotp is used in the web app for clean
+    integration and QR code URI generation.
+
+  urlcheckerapi.py  (VirusTotal CLI tool with hardcoded key and input loop)
+  → Refactored into utils/virustotal.py as scan_url() and scan_file().
+    API key moved to settings.VIRUSTOTAL_API_KEY.
+    CLI loop removed. Functions return dicts instead of printing.
+
+  rc4.py, bgv.py, e-votingsystem.py
+  → Not yet integrated. Available for the next phase:
+    RSA asymmetric encryption, digital signatures, and the grades app.
+
+
+================================================================================
+PART 18 — HOW TO RUN THE PROJECT
+================================================================================
+
+  cd /home/Morika1/edusecure
+  venv/bin/python manage.py runserver
+
+  Then open:  http://127.0.0.1:8000/
+
+  To create a superuser for the admin panel:
+  venv/bin/python manage.py createsuperuser
+
+  Admin panel:  http://127.0.0.1:8000/admin/
+
+
+================================================================================
+PART 19 — WHAT STILL NEEDS TO BE DONE (NEXT PHASES)
+================================================================================
+
+  - grades/ app         — grade model, encrypted grade storage, HMAC signing
+  - RSA encryption      — asymmetric encryption for key exchange / assignment artefact
+  - Digital signatures  — sign submissions on upload, verify on read
+  - Audit log           — log all grade changes with timestamp and user for
+                          the assignment requirement to detect tampering
+  - rc4.py integration  — demonstrate stream cipher in the artefact
+  - bgv.py integration  — demonstrate homomorphic encryption (e-voting demo)
+
+
+================================================================================
+END OF LOG
+================================================================================

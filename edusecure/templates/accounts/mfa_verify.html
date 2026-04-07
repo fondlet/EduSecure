@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}MFA Verification{% endblock %}
+{% block content %}
+<div class="row justify-content-center">
+  <div class="col-md-5">
+    <div class="card p-4">
+      <h3 class="mb-1">&#128272; Two-Factor Verification</h3>
+      <p class="text-muted mb-3">
+        Enter the 6-digit code from <strong>Microsoft Authenticator</strong>.
+      </p>
+      <form method="post">
+        {% csrf_token %}
+        <div class="mb-3">
+          <label class="form-label fw-semibold">Authentication Code</label>
+          {{ form.token }}
+        </div>
+        <button type="submit" class="btn btn-primary w-100">Verify</button>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}
