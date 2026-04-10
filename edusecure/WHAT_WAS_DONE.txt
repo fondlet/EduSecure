@@ -4,6 +4,21 @@ EDUSECURE — FULL DEVELOPMENT LOG
 
 
 ================================================================================
+CHANGE — PASSWORD POLICY REMOVED (2026-04-10)
+================================================================================
+
+AUTH_PASSWORD_VALIDATORS set to an empty list in config/settings.py.
+
+Previously Django enforced:
+  - UserAttributeSimilarityValidator  (password can't resemble username/email)
+  - MinimumLengthValidator            (8 character minimum)
+  - CommonPasswordValidator           (blocks common passwords like "password")
+  - NumericPasswordValidator          (can't be entirely numbers)
+
+Now users can set any password they want with no restrictions.
+
+
+================================================================================
 PART 1 — SCRIPT ORGANISATION
 ================================================================================
 
