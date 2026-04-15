@@ -24,6 +24,8 @@ INSTALLED_APPS = [
     'accounts',
     'submissions',
     'grades',
+    'materials',
+    'audit',
 ]
 
 MIDDLEWARE = [
@@ -65,17 +67,12 @@ DATABASES = {
 
 AUTH_PASSWORD_VALIDATORS = []
 
-# Custom user model — adds TOTP secret, MFA flag, and role field
 AUTH_USER_MODEL = 'accounts.User'
 
-# AES-256 key derived deterministically from SECRET_KEY via SHA-256.
-# In production, set SECRET_KEY to a long random value via environment variable.
 ENCRYPTION_KEY: bytes = hashlib.sha256(SECRET_KEY.encode()).digest()
 
-# VirusTotal API key — loaded from .env (never hardcoded in source)
 VIRUSTOTAL_API_KEY = os.environ.get('VIRUSTOTAL_API_KEY', '')
 
-# Redirect unauthenticated users to login
 LOGIN_URL = '/accounts/login/'
 LOGIN_REDIRECT_URL = '/submissions/'
 

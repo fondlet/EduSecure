@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}New Assignment{% endblock %}
+{% block content %}
+<div class="row justify-content-center">
+  <div class="col-md-6">
+    <div class="card p-4">
+      <h3 class="mb-1">Create Assignment</h3>
+      <p class="text-muted mb-3">Set a title, optional description, and a deadline. Students will see this assignment in the submission upload form.</p>
+      <form method="post">
+        {% csrf_token %}
+        <div class="mb-3">
+          <label class="form-label fw-semibold">Title</label>
+          {{ form.title }}
+          {% if form.title.errors %}<div class="text-danger small mt-1">{{ form.title.errors }}</div>{% endif %}
+        </div>
+        <div class="mb-3">
+          <label class="form-label fw-semibold">Description <span class="text-muted fw-normal">(optional)</span></label>
+          {{ form.description }}
+        </div>
+        <div class="mb-3">
+          <label class="form-label fw-semibold">Deadline (UTC)</label>
+          {{ form.deadline }}
+          {% if form.deadline.errors %}<div class="text-danger small mt-1">{{ form.deadline.errors }}</div>{% endif %}
+        </div>
+        <button type="submit" class="btn btn-primary w-100">Create Assignment</button>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}

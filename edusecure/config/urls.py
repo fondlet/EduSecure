@@ -7,5 +7,7 @@ urlpatterns = [
     path('accounts/',    include('accounts.urls')),
     path('submissions/', include('submissions.urls')),
     path('grades/',      include('grades.urls')),
+    path('materials/',   include('materials.urls')),
+    path('audit/',       include('audit.urls')),
     path('',             lambda req: redirect('login'), name='home'),
 ]

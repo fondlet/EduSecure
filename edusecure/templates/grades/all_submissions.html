@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block title %}All Submissions{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h2>All Submissions</h2>
+  <a href="{% url 'late_report' %}" class="btn btn-outline-warning btn-sm">Late Submissions Report</a>
+</div>
+
+{% if submissions %}
+  <div class="table-responsive">
+    <table class="table table-hover bg-white rounded shadow-sm">
+      <thead class="table-dark">
+        <tr>
+          <th>Student</th>
+          <th>Title</th>
+          <th>Assignment</th>
+          <th>Submitted</th>
+          <th>Status</th>
+          <th>VT</th>
+          <th>Grade</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for sub in submissions %}
+        <tr>
+          <td>{{ sub.student.username }}</td>
+          <td>{{ sub.title }}</td>
+          <td class="small text-muted">{{ sub.assignment.title|default:"—" }}</td>
+          <td class="text-nowrap">{{ sub.submitted_at|date:"d M Y H:i" }}</td>
+          <td>
+            {% if sub.is_late %}
+              <span class="badge bg-danger">LATE</span>
+            {% else %}
+              <span class="badge bg-success">On time</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if sub.vt_safe == True %}
+              <span class="badge bg-success">Safe</span>
+            {% elif sub.vt_safe == False %}
+              <span class="badge bg-danger">Threat</span>
+            {% else %}
+              <span class="badge bg-secondary">Unknown</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if sub.grade %}
+              <span class="badge bg-success">Graded</span>
+            {% else %}
+              <span class="badge bg-warning text-dark">Not graded</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if sub.grade %}
+              <a href="{% url 'edit_grade' sub.pk %}" class="btn btn-sm btn-outline-primary">Edit</a>
+            {% else %}
+              <a href="{% url 'grade_submission' sub.pk %}" class="btn btn-sm btn-primary">Grade</a>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% else %}
+  <div class="alert alert-info">No submissions yet.</div>
+{% endif %}
+{% endblock %}

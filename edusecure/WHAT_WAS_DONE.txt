@@ -753,5 +753,342 @@ PART 19 — WHAT STILL NEEDS TO BE DONE (NEXT PHASES)
 
 
 ================================================================================
+CHANGE — MFA SETUP BUG FIX (2026-04-12)
+================================================================================
+
+File: accounts/views.py — mfa_setup_view
+
+BUG: generate_totp_secret() was called unconditionally at the bottom of the
+view, meaning it ran on every POST request including failed ones.  When a user
+entered a wrong code, the secret was regenerated and saved to the DB, instantly
+invalidating the QR code they had already scanned in their authenticator app.
+They could never enter a correct code because every attempt produced a new secret.
+
+ALSO: on POST failure the view was passing MFATokenForm() (a fresh empty form)
+instead of the bound form, so validation errors were never shown to the user.
+
+FIX:
+  - On GET  → call generate_totp_secret() (fresh secret, show QR as before)
+  - On POST → keep user.totp_secret as-is; only re-render QR with existing secret
+  - Pass the bound form (with errors) back to the template on POST failure
+
+
+================================================================================
+CHANGE — BLOCK MALICIOUS FILE UPLOADS (2026-04-12)
+================================================================================
+
+File: submissions/views.py — upload_submission
+
+Previously a file flagged as malicious by VirusTotal was still saved to the
+database. Now if vt['safe'] is False the upload is rejected immediately with
+an error message and nothing is written to the DB.
+
+vt['safe'] == None (scan timed out) still allows the upload through so
+legitimate files are not blocked by a VT API timeout.
+
+
+================================================================================
+PART 20 — GRADES APP (2026-04-12)
+================================================================================
+
+grades/models.py
+  Grade model — OneToOne with Submission
+    encrypted_score    — AES-256-GCM ciphertext of score (0-100)
+    encrypted_feedback — AES-256-GCM ciphertext of feedback text
+    hmac_digest        — HMAC-SHA256 over "<score>|<feedback>" — detects tampering
+    grader             — FK to User (the lecturer who graded it)
+    graded_at / updated_at — timestamps
+
+grades/views.py
+  all_submissions  — lists every submission with grade status (for lecturers)
+  grade_submission — lecturer assigns score + feedback to an ungraded submission
+  edit_grade       — lecturer updates an existing grade
+  my_grades        — student decrypts and views their own grades + HMAC integrity badge
+
+grades/urls.py
+  /grades/                        → all_submissions
+  /grades/<id>/grade/             → grade_submission
+  /grades/<id>/edit/              → edit_grade
+  /grades/my/                     → my_grades
+
+templates/grades/
+  all_submissions.html  — table of all submissions with Grade/Edit buttons
+  grade_form.html       — score + feedback form (shared for grade and edit)
+  my_grades.html        — student grade cards with score, feedback, integrity badge
+
+base.html updated — added "My Grades" and "Grade Submissions" navbar links
+
+Migration: grades/migrations/0001_initial.py — applied
+
+
+================================================================================
+PART 21 — RSA DIGITAL SIGNATURES (2026-04-12)
+================================================================================
+
+utils/crypto.py — three new functions:
+  generate_rsa_keypair()         — generates RSA-2048 key pair, returns (private_pem, public_pem)
+  sign_data(data, private_pem)   — PKCS#1 v1.5 + SHA-256 signature, returns base64 string
+  verify_signature(data, sig, pub) — verifies signature, returns bool
+
+accounts/models.py
+  Added rsa_private_key (TextField) and rsa_public_key (TextField) to User
+  Added ensure_rsa_keypair() — generates and saves keypair on first use
+
+submissions/models.py
+  Added signature (TextField)        — base64 RSA signature over HMAC digest
+  Added signer_public_key (TextField) — PEM public key snapshot at time of signing
+
+submissions/views.py — upload_submission
+  Step 4: calls user.ensure_rsa_keypair() then signs the HMAC digest with
+  the student's RSA private key before saving the submission.
+
+submissions/views.py — list_submissions
+  Calls verify_signature() on each submission's HMAC digest.
+  Passes sig_ok bool to template.
+
+templates/submissions/list.html
+  Added "Signature Valid" / "Signature Invalid" badge per submission.
+
+Migrations applied:
+  accounts/migrations/0002_user_rsa_private_key_user_rsa_public_key.py
+  submissions/migrations/0002_submission_signature_submission_signer_public_key.py
+
+
+================================================================================
+CHANGE — MFA TOTP CLOCK DRIFT FIX (2026-04-13)
+================================================================================
+
+File: accounts/models.py — verify_totp()
+
+PROBLEM:
+  timedatectl reported "System clock synchronized: no" — the NTP service is
+  active but the system clock has drifted.  TOTP is time-based (RFC 6238,
+  30-second windows) so even a small drift causes the server's expected code
+  to differ from the authenticator app's code, resulting in every verification
+  attempt failing.
+
+FIX:
+  Increased valid_window from 2 to 4 in the pyotp TOTP.verify() call.
+  valid_window=4 accepts codes from ±4 intervals (±120 seconds) around the
+  current server time, covering typical NTP drift without meaningfully
+  weakening security.
+
+NOTE:
+  The underlying cause is system-level NTP sync.  To fully fix it, run:
+    sudo systemctl restart systemd-timesyncd
+  Once the clock is synchronised, valid_window can be reduced back to 1.
+
+
+================================================================================
+CHANGE — MFA SECRET OVERWRITE BUG FIX (2026-04-13)
+================================================================================
+
+File: accounts/views.py — mfa_setup_view
+
+BUG:
+  Every GET request to /accounts/mfa/setup/ called generate_totp_secret(),
+  which created a new secret and overwrote the one already in the database.
+  If a user visited the setup page again after already configuring their
+  authenticator app, the DB secret changed instantly but the app still held
+  the old secret — every subsequent login code was wrong.
+
+FIX:
+  On GET, only generate a new secret if the user has no secret yet.
+  Revisiting the page now shows the existing QR code unchanged.
+
+  To intentionally reset MFA (e.g. switching authenticator apps), the user
+  can visit /accounts/mfa/setup/?reset=1 — this generates a fresh secret,
+  disables mfa_enabled, and requires re-confirmation with a new code.
+
+
+================================================================================
+PART 22 — LEARNING MATERIALS APP (2026-04-14)
+================================================================================
+
+New app: materials/
+
+materials/models.py
+  LearningMaterial model:
+    uploader          — FK to User (lecturer/admin who uploaded)
+    title             — CharField(255)
+    description       — CharField(500, optional short description)
+    uploaded_at       — DateTimeField(auto_now_add)
+    encrypted_content — AES-256-GCM ciphertext
+    hmac_digest       — HMAC-SHA256 over raw file bytes
+    vt_result         — VirusTotal result message
+    vt_safe           — Boolean (null=unknown)
+    signature         — RSA-2048 signature over HMAC digest
+    signer_public_key — PEM snapshot at upload time
+
+materials/views.py
+  upload_material
+    — Restricted to users with role 'lecturer' or 'admin' (checked via
+      _lecturer_required(); redirects students with an error message).
+    — Same pipeline as submissions: HMAC → AES-GCM encrypt → VT scan →
+      RSA sign → save. Malicious VT results block the upload.
+
+  list_materials
+    — All authenticated users can view the full materials list.
+    — Decrypts each material and verifies both HMAC integrity and RSA
+      signature, passing decrypted_ok and sig_ok flags to the template.
+    — Passes can_upload=True only for lecturers/admins so the
+      "+ Upload Material" button only appears for authorised users.
+
+materials/urls.py
+  /materials/         → list_materials  (name='material_list')
+  /materials/upload/  → upload_material (name='upload_material')
+
+templates/materials/
+  upload.html — title, optional description, file input; same security
+                explanation as submissions upload
+  list.html   — cards with uploader name, timestamp, description,
+                Integrity/Signature/VT badges, collapsible content preview
+
+config/settings.py — added 'materials' to INSTALLED_APPS
+config/urls.py     — added path('materials/', include('materials.urls'))
+templates/base.html — added "Materials" navbar link (between Submissions
+                      and My Grades)
+
+Migration: materials/migrations/0001_initial.py — applied
+
+
+================================================================================
+PART 23 — AUDIT LOG APP (2026-04-14)
+================================================================================
+
+New app: audit/
+
+audit/models.py
+  AuditLog model:
+    user       — FK to User (null for anonymous events e.g. failed logins)
+    action     — one of: login, login_failed, logout, submission_create,
+                  grade_create, grade_update, material_upload, assignment_create
+    detail     — human-readable description of the event
+    ip_address — GenericIPAddressField, extracted from HTTP_X_FORWARDED_FOR
+                  or REMOTE_ADDR
+    timestamp  — DateTimeField(auto_now_add=True), UTC
+
+  log_event(user, action, detail, request)
+    — module-level helper; any view imports this to create a log entry.
+    — extracts the real client IP even behind a reverse proxy.
+    — safely handles None/anonymous users.
+
+audit/views.py  — audit_log_view
+    — restricted to lecturers/admins via lecturer_required decorator.
+    — returns most recent 500 AuditLog entries.
+
+audit/urls.py   →  /audit/
+
+Hooks added to existing views:
+  accounts/views.py
+    — login_view:      logs 'login_failed' (username in detail) or 'login'
+    — mfa_verify_view: logs 'login' after successful MFA verification
+    — logout_view:     logs 'logout' before auth.logout()
+
+  submissions/views.py
+    — upload_submission: logs 'submission_create' (includes LATE flag if late)
+
+  grades/views.py
+    — grade_submission: logs 'grade_create' (includes student and score)
+    — edit_grade:       logs 'grade_update' (includes new score)
+
+templates/audit/log.html
+  — Bootstrap table with colour-coded action badges, timestamps, IPs.
+  — "Audit Log" link appears in navbar for lecturers/admins only.
+
+
+================================================================================
+PART 24 — ASSIGNMENT MODEL + LATE SUBMISSION DETECTION (2026-04-14)
+================================================================================
+
+submissions/models.py — new Assignment model:
+  title       — CharField(255)
+  description — TextField (optional)
+  deadline    — DateTimeField (UTC)
+  created_by  — FK to User
+  created_at  — DateTimeField(auto_now_add)
+
+submissions/models.py — Submission updated:
+  assignment  — FK to Assignment (nullable; existing submissions unaffected)
+  is_late     — BooleanField(default=False)
+              — set True at upload time if timezone.now() > assignment.deadline
+
+submissions/views.py — new views:
+  list_assignments   — lecturer-only; table of all assignments with Open/Closed badge
+  create_assignment  — lecturer-only; datetime-local form, deadline stored UTC
+  late_report        — lecturer-only; table of all is_late=True submissions
+
+submissions/urls.py — new routes:
+  /submissions/assignments/       → list_assignments   (name='list_assignments')
+  /submissions/assignments/new/   → create_assignment  (name='create_assignment')
+  /submissions/late/              → late_report        (name='late_report')
+
+templates:
+  submissions/assignments.html      — assignment table with Open/Closed status
+  submissions/create_assignment.html — form with datetime-local deadline input
+  submissions/late_report.html       — late submissions report table
+  submissions/upload.html            — updated with optional Assignment dropdown
+  submissions/list.html              — added LATE badge per submission
+  grades/all_submissions.html        — added Assignment column + On time/LATE badge
+                                       + "Late Submissions Report" button
+
+
+================================================================================
+PART 25 — ROLE-BASED ACCESS CONTROL (2026-04-14)
+================================================================================
+
+utils/decorators.py — new file:
+  lecturer_required(view_func)
+    — checks request.user.is_authenticated; redirects to login if not.
+    — checks request.user.role in ('lecturer', 'admin'); redirects to
+      submission_list with an error message if the user is a student.
+    — used as a decorator on all lecturer-only views.
+
+Views protected by lecturer_required:
+  grades/views.py:    all_submissions, grade_submission, edit_grade
+  submissions/views.py: list_assignments, create_assignment, late_report
+  audit/views.py:     audit_log_view
+
+Effect:
+  — Students visiting /grades/, /grades/<id>/grade/, /grades/<id>/edit/,
+    /submissions/assignments/*, /audit/ now get an error message and are
+    redirected to their submissions list instead of seeing lecturer data.
+  — grades/my_grades remains @login_required (any authenticated user).
+
+templates/base.html — navbar updated:
+  — "Assignments", "Grade Submissions", "Audit Log" links only render for
+    users with role == 'lecturer' or role == 'admin'.
+  — "My Grades", "Submissions", "Materials" visible to all authenticated users.
+
+
+================================================================================
+PART 26 — DATASETTE SQLITE BROWSER (2026-04-14)
+================================================================================
+
+Datasette 0.65.2 installed into venv.
+
+Datasette wraps any SQLite database and exposes it as:
+  — a browsable web UI (tables, rows, columns, filters, sorting)
+  — a read-only JSON API  (/db/table.json?_shape=array)
+  — a SQL query interface (/db?sql=SELECT+...)
+
+To inspect db.sqlite3 interactively:
+  venv/bin/datasette db.sqlite3
+
+Then open:  http://127.0.0.1:8001/
+
+Tables exposed (all EduSecure data including audit_auditlog):
+  accounts_user, submissions_submission, submissions_assignment,
+  grades_grade, materials_learningmaterial, audit_auditlog,
+  and all Django internal tables.
+
+Important: Datasette is read-only and for development/investigation use only.
+It must NOT be run with access to db.sqlite3 in production as it exposes
+all data (including encrypted fields and HMAC digests) without authentication.
+
+requirements.txt — added datasette>=0.64
+
+
+================================================================================
 END OF LOG
 ================================================================================

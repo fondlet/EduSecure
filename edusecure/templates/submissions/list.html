@@ -11,27 +11,36 @@
   <div class="card mb-3">
     <div class="card-body">
       <div class="d-flex justify-content-between">
-        <h5 class="card-title">{{ item.sub.title }}</h5>
+        <h5 class="card-title mb-1">{{ item.sub.title }}</h5>
         <small class="text-muted">{{ item.sub.submitted_at|date:"d M Y H:i" }}</small>
       </div>
 
-      <!-- Integrity status -->
+      {% if item.sub.assignment %}
+        <small class="text-muted d-block mb-2">Assignment: <em>{{ item.sub.assignment.title }}</em></small>
+      {% endif %}
+
       <span class="badge {% if item.hmac_ok %}bg-success{% else %}bg-danger{% endif %} me-1">
         {% if item.hmac_ok %}&#10003; Integrity OK{% else %}&#9888; Integrity FAIL{% endif %}
       </span>
 
-      <!-- VirusTotal verdict -->
+      <span class="badge {% if item.sig_ok %}bg-success{% else %}bg-danger{% endif %} me-1">
+        {% if item.sig_ok %}&#10003; Signature Valid{% else %}&#9888; Signature Invalid{% endif %}
+      </span>
+
       {% if item.sub.vt_safe is None %}
-        <span class="badge bg-secondary">VT: Unknown</span>
+        <span class="badge bg-secondary me-1">VT: Unknown</span>
       {% elif item.sub.vt_safe %}
-        <span class="badge bg-success">&#10003; VT: Safe</span>
+        <span class="badge bg-success me-1">&#10003; VT: Safe</span>
       {% else %}
-        <span class="badge bg-danger">&#9888; VT: Threat Detected</span>
+        <span class="badge bg-danger me-1">&#9888; VT: Threat Detected</span>
+      {% endif %}
+
+      {% if item.sub.is_late %}
+        <span class="badge bg-danger me-1">&#9888; LATE</span>
       {% endif %}
 
       <p class="mt-2 text-muted small">{{ item.sub.vt_result }}</p>
 
-      <!-- Decrypted preview -->
       <details class="mt-2">
         <summary class="text-muted small">View decrypted preview</summary>
         <pre class="bg-light p-2 mt-1 rounded small">{{ item.plaintext }}</pre>

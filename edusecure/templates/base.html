@@ -22,6 +22,13 @@
       <ul class="navbar-nav ms-auto">
         {% if user.is_authenticated %}
           <li class="nav-item"><a class="nav-link" href="{% url 'submission_list' %}">Submissions</a></li>
+          <li class="nav-item"><a class="nav-link" href="{% url 'material_list' %}">Materials</a></li>
+          <li class="nav-item"><a class="nav-link" href="{% url 'my_grades' %}">My Grades</a></li>
+          {% if user.role == 'lecturer' or user.role == 'admin' %}
+            <li class="nav-item"><a class="nav-link" href="{% url 'list_assignments' %}">Assignments</a></li>
+            <li class="nav-item"><a class="nav-link" href="{% url 'all_submissions' %}">Grade Submissions</a></li>
+            <li class="nav-item"><a class="nav-link" href="{% url 'audit_log' %}">Audit Log</a></li>
+          {% endif %}
           <li class="nav-item"><a class="nav-link" href="{% url 'mfa_setup' %}">MFA Setup</a></li>
           <li class="nav-item"><a class="nav-link" href="{% url 'logout' %}">Logout ({{ user.username }})</a></li>
         {% else %}

@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}Late Submissions Report{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h3>Late Submissions Report</h3>
+  <a href="{% url 'all_submissions' %}" class="btn btn-outline-secondary btn-sm">Back to All Submissions</a>
+</div>
+
+{% if late_subs %}
+  <div class="table-responsive">
+    <table class="table table-hover bg-white rounded shadow-sm">
+      <thead class="table-dark">
+        <tr>
+          <th>Student</th>
+          <th>Submission Title</th>
+          <th>Assignment</th>
+          <th>Deadline (UTC)</th>
+          <th>Submitted (UTC)</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for sub in late_subs %}
+        <tr class="table-warning">
+          <td>{{ sub.student.username }}</td>
+          <td>{{ sub.title }}</td>
+          <td>{{ sub.assignment.title|default:"—" }}</td>
+          <td class="text-nowrap">{{ sub.assignment.deadline|date:"d M Y H:i"|default:"—" }}</td>
+          <td class="text-nowrap">{{ sub.submitted_at|date:"d M Y H:i" }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="text-muted small">{{ late_subs|length }} late submission{{ late_subs|length|pluralize }} found.</p>
+{% else %}
+  <div class="alert alert-success">No late submissions found.</div>
+{% endif %}
+{% endblock %}

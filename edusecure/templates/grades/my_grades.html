@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}My Grades{% endblock %}
+
+{% block content %}
+<h2 class="mb-3">My Grades</h2>
+
+{% if results %}
+  {% for entry in results %}
+    <div class="card mb-3 p-3">
+      <div class="d-flex justify-content-between align-items-start">
+        <div>
+          <h5 class="mb-1">{{ entry.submission.title }}</h5>
+          <small class="text-muted">Submitted {{ entry.submission.submitted_at|date:"d M Y H:i" }}</small>
+        </div>
+        {% if entry.score is not None %}
+          <span class="fs-3 fw-bold text-primary">{{ entry.score }}<span class="fs-6 text-muted">/100</span></span>
+        {% else %}
+          <span class="badge bg-warning text-dark">Not graded yet</span>
+        {% endif %}
+      </div>
+
+      {% if entry.score is not None %}
+        <hr>
+        <div class="d-flex gap-2 mb-2">
+          {% if entry.integrity_ok %}
+            <span class="badge bg-success">Integrity OK</span>
+          {% else %}
+            <span class="badge bg-danger">Integrity FAIL — grade may have been tampered</span>
+          {% endif %}
+          <small class="text-muted">Graded {{ entry.graded_at|date:"d M Y H:i" }}</small>
+        </div>
+        <p class="mb-0"><strong>Feedback:</strong> {{ entry.feedback }}</p>
+      {% endif %}
+    </div>
+  {% endfor %}
+{% else %}
+  <div class="alert alert-info">No submissions yet.</div>
+{% endif %}
+{% endblock %}

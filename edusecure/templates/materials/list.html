@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}Learning Materials{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h3>Learning Materials</h3>
+  {% if can_upload %}
+    <a href="{% url 'upload_material' %}" class="btn btn-primary">+ Upload Material</a>
+  {% endif %}
+</div>
+
+{% if materials %}
+  {% for item in materials %}
+  <div class="card mb-3">
+    <div class="card-body">
+      <div class="d-flex justify-content-between">
+        <h5 class="card-title">{{ item.mat.title }}</h5>
+        <small class="text-muted">{{ item.mat.uploaded_at|date:"d M Y H:i" }} — {{ item.mat.uploader.username }}</small>
+      </div>
+
+      {% if item.mat.description %}
+        <p class="text-muted mb-2">{{ item.mat.description }}</p>
+      {% endif %}
+
+      <span class="badge {% if item.decrypted_ok %}bg-success{% else %}bg-danger{% endif %} me-1">
+        {% if item.decrypted_ok %}&#10003; Integrity OK{% else %}&#9888; Integrity FAIL{% endif %}
+      </span>
+
+      <span class="badge {% if item.sig_ok %}bg-success{% else %}bg-danger{% endif %} me-1">
+        {% if item.sig_ok %}&#10003; Signature Valid{% else %}&#9888; Signature Invalid{% endif %}
+      </span>
+
+      {% if item.mat.vt_safe is None %}
+        <span class="badge bg-secondary">VT: Unknown</span>
+      {% elif item.mat.vt_safe %}
+        <span class="badge bg-success">&#10003; VT: Safe</span>
+      {% else %}
+        <span class="badge bg-danger">&#9888; VT: Threat Detected</span>
+      {% endif %}
+
+      <p class="mt-2 text-muted small">{{ item.mat.vt_result }}</p>
+
+      <details class="mt-2">
+        <summary class="text-muted small">View decrypted content</summary>
+        <pre class="bg-light p-2 mt-1 rounded small">{{ item.plaintext }}</pre>
+      </details>
+    </div>
+  </div>
+  {% endfor %}
+{% else %}
+  <p class="text-muted">No learning materials have been uploaded yet.</p>
+{% endif %}
+{% endblock %}
